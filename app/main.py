@@ -7,7 +7,8 @@ from urllib.parse import quote
 import httpx
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
-from huggingface_hub import InferenceClient
+
+# from huggingface_hub import InferenceClient
 from pydantic import BaseModel, Field
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
