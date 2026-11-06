@@ -1,6 +1,7 @@
 import base64
 import io
 import os
+import random
 import re
 from urllib.parse import quote
 
@@ -182,6 +183,7 @@ async def generate_image(request: Request, body: GenerateImageRequest):
         "private": "true",
         "nologo": "true",
         "safe": "true",
+        "seed": random.randint(0, 2147483647),
     }
 
     headers = {"Authorization": f"Bearer {POLLINATIONS_API_KEY}"}
