@@ -7,7 +7,7 @@ from urllib.parse import quote
 
 import httpx
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 
 # from huggingface_hub import InferenceClient
 from pydantic import BaseModel, Field
@@ -32,11 +32,40 @@ LLM_MODEL = os.getenv("LLM_MODEL", "openai/gpt-oss-120b")
 POLLINATIONS_API_KEY = os.getenv("POLLINATIONS_API_KEY", "")
 POLLINATIONS_MODEL = os.getenv("POLLINATION_MODEL", "black-forest-labs/flux.1-schnell")
 
+SUPABASE_URL = os.getenv("SUPABASE_URL", "").rstrip("/")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
+
 app = FastAPI(title="AI Image Generate Gateway")
 # * Limit form using too much
 limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+# * LOGIN CHECK: ask Supabase if the token from the app is real
+async def require_user(authorization: str | None = Header(default=None)):
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Please log in first.")
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        raise HTTPException(
+            status_code=500, detail="SUPABASE_URL or SUPABASE_KEY not configured."
+        )
+
+    token = authorization[len("Bearer ") :]
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"{SUPABASE_URL}/auth/v1/user",
+                headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {token}"},
+            )
+    except httpx.RequestError:
+        raise HTTPException(status_code=503, detail="Could not reach the login server.")
+
+    if resp.status_code != 200:
+        raise HTTPException(
+            status_code=401, detail="Login expired. Please log in again."
+        )
+    return resp.json()
 
 
 # * DATA CONTRACT ( ENCHANTED PROMPT )
@@ -83,7 +112,9 @@ def contains_unsafe_content(text: str) -> bool:
 
 @app.post("/api/ai/enhance-prompt", response_model=EnhancePromptResponse)
 @limiter.limit("5/minute")
-async def enhance_prompt(request: Request, body: EnhancePromptRequest):
+async def enhance_prompt(
+    request: Request, body: EnhancePromptRequest, user: dict = Depends(require_user)
+):
     if not LLM_API_KEY:
         raise HTTPException(
             status_code=500,
@@ -163,7 +194,9 @@ NSFW_LABEL = "nsfw"
 @app.post("/api/ai/generate-image", response_model=GenerateImageRespone)
 @limiter.limit("5/minute")
 # * AH NIS BOS POLLINATION
-async def generate_image(request: Request, body: GenerateImageRequest):
+async def generate_image(
+    request: Request, body: GenerateImageRequest, user: dict = Depends(require_user)
+):
     if contains_unsafe_content(body.prompt):
         raise HTTPException(
             status_code=400, detail="this prompt violates our contant policy."
